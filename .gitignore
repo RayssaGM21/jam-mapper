@@ -1,0 +1,20 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local runtime data. For Streamlit Cloud, use secrets and GitHub storage.
+exports/
+*.db
+*.sqlite
+*.sqlite3
+
+# Local Streamlit secrets only. Keep config and example files.
+.streamlit/secrets.toml
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
