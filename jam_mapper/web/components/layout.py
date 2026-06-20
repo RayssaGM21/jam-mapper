@@ -25,7 +25,7 @@ def _sidebar_logo_html() -> str:
     )
 
 
-def render_sidebar(events_list: List[Dict[str, Any]]):
+def render_sidebar(events_list: List[Dict[str, Any]], user=None):
     with st.sidebar:
         st.markdown(_sidebar_logo_html(), unsafe_allow_html=True)
         st.markdown(
@@ -83,4 +83,10 @@ def render_sidebar(events_list: List[Dict[str, Any]]):
                 run_sync(full=True)
 
         st.divider()
-        st.markdown("<div class='sidebar-footer'>v1.1 | AWS Jam tracker</div>", unsafe_allow_html=True)
+        if user:
+            st.caption(user.email)
+            if st.button("Sair", use_container_width=True):
+                from jam_mapper.web.auth import logout
+
+                logout()
+        st.markdown("<div class='sidebar-footer'>v1.2 | AWS Jam tracker</div>", unsafe_allow_html=True)

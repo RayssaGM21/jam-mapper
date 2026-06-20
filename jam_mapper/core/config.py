@@ -33,6 +33,7 @@ class Settings:
     export_path: str
     token_refresh_enabled: bool
     token_refresh_url: str
+    token_refresh_method: str
     token_refresh_cookie: str
     token_refresh_headers_json: str
     token_refresh_body_json: str
@@ -51,6 +52,7 @@ def get_settings() -> Settings:
         export_path=_get_config_value("EXPORT_PATH", "./exports"),
         token_refresh_enabled=str(_get_config_value("JAM_TOKEN_REFRESH_ENABLED", "false")).lower() == "true",
         token_refresh_url=_get_config_value("JAM_TOKEN_REFRESH_URL", "https://vs.aws.amazon.com/token"),
+        token_refresh_method=str(_get_config_value("JAM_TOKEN_REFRESH_METHOD", "POST")).upper(),
         token_refresh_cookie=_get_config_value("JAM_TOKEN_REFRESH_COOKIE", ""),
         token_refresh_headers_json=_get_config_value("JAM_TOKEN_REFRESH_HEADERS_JSON", "{}"),
         token_refresh_body_json=_get_config_value("JAM_TOKEN_REFRESH_BODY_JSON", "{}"),

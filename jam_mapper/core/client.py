@@ -11,7 +11,9 @@ class JamClient:
     def __init__(self, base_url: str | None = None, jwt: str | None = None):
         s = get_settings()
         self.base_url = base_url or s.base_url
-        self.jwt = jwt or s.jwt or get_cached_authorization_token()
+        # A refreshed runtime token must take precedence over a potentially
+        # stale bootstrap token configured in the deployment secrets.
+        self.jwt = jwt or get_cached_authorization_token() or s.jwt
         self._client = httpx.Client(timeout=30.0)
 
     def _headers(self) -> Dict[str, str]:
