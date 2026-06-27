@@ -72,7 +72,7 @@ def refresh_authorization_token(force: bool = False) -> str:
             if method == "GET":
                 response = client.get(settings.token_refresh_url, headers=headers, params=body or None)
             else:
-                response = client.post(settings.token_refresh_url, headers=headers, json=body or None)
+                response = client.post(settings.token_refresh_url, headers=headers, data=body or None)
             response.raise_for_status()
             try:
                 payload = response.json()
