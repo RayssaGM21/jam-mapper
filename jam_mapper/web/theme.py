@@ -60,7 +60,9 @@ section[data-testid="stSidebar"] {
 }
 
 section[data-testid="stSidebar"] > div {
-  overflow: hidden !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  max-height: 100vh !important;
   padding: 0rem 1rem !important;
 }
 
@@ -285,7 +287,7 @@ section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
 }
 
 section[data-testid="stSidebar"] hr {
-  margin: 0.9rem 0 !important;
+  margin: 0.55rem 0 !important;
 }
 
 section[data-testid="stSidebar"] label,
