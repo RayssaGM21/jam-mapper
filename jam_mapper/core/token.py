@@ -29,7 +29,7 @@ def _json_env(value: Any) -> Dict[str, Any]:
 
 
 def _extract_token(payload: Dict[str, Any]) -> Optional[str]:
-    for key in ["authorization", "Authorization", "accessToken", "access_token", "idToken", "id_token", "jwt", "token"]:
+    for key in ["authorization", "Authorization", "idToken", "id_token", "accessToken", "access_token", "jwt", "token"]:        
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
