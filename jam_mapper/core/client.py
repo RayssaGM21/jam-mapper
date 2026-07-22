@@ -37,6 +37,12 @@ class JamClient:
             if refreshed and refreshed != self.jwt:
                 self.jwt = refreshed
                 response = self._client.get(url, headers=self._headers())
+        if response.status_code == 403:
+            raise httpx.HTTPStatusError(
+                f"AWS Jam returned 403 Forbidden for {url}. This usually means the configured JWT is invalid for this environment or lacks access to the admin endpoint.",
+                request=response.request,
+                response=response,
+            )
         response.raise_for_status()
         return response.json()
 

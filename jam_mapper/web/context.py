@@ -244,7 +244,10 @@ def run_sync(full: bool = False):
         with st.spinner("Sincronizando dados com a AWS Jam..."):
             result = sync_challenges(full=full)
     except Exception as exc:
-        st.error(f"Falha na sincronização com a AWS Jam: {exc}")
+        st.error(
+            "Falha na sincronização com a AWS Jam. O token configurado provavelmente não tem acesso a esta rota administrativa ou o ambiente está diferente do esperado."
+        )
+        st.caption(str(exc))
         return
 
     imported = int(result.get("imported") or 0)
