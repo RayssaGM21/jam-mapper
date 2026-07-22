@@ -11,9 +11,12 @@ class JamClient:
     def __init__(self, base_url: str | None = None, jwt: str | None = None):
         s = get_settings()
         self.base_url = base_url or s.base_url
-        # A refreshed runtime token must take precedence over a potentially
-        # stale bootstrap token configured in the deployment secrets.
-        self.jwt = jwt or get_cached_authorization_token() or s.jwt
+        cached_token = get_cached_authorization_token()
+        # In refresh mode the runtime token is the newest credential. With
+        # refresh disabled, JAM_API_JWT is authoritative and must not be
+        # shadowed by an old value left in the local database.
+        configured_token = (cached_token or s.jwt) if s.token_refresh_enabled else (s.jwt or cached_token)
+        self.jwt = jwt or configured_token
         self._client = httpx.Client(timeout=30.0)
 
     def _headers(self) -> Dict[str, str]:

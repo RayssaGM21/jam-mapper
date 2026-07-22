@@ -18,6 +18,21 @@ TOKEN_REFRESH_TS_KEY = "runtime_authorization_token_last_refresh"
 _REFRESH_LOCK = threading.Lock()
 
 
+def get_runtime_authorization_token(force: bool = False) -> str:
+    """Return the active authorization token, using refresh when possible and JWT fallback otherwise."""
+    settings = get_settings()
+    if not settings.token_refresh_enabled:
+        return settings.jwt or get_cached_authorization_token()
+
+    try:
+        return refresh_authorization_token(force=force)
+    except Exception:
+        cached = get_cached_authorization_token()
+        if cached:
+            return cached
+        return settings.jwt or ""
+
+
 def _json_env(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value

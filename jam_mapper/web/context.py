@@ -2,9 +2,6 @@
 
 from typing import Any, Dict, List
 import json
-import subprocess
-import sys
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -240,21 +237,27 @@ def load_events() -> List[Dict[str, Any]]:
 
 
 def run_sync(full: bool = False):
-    """Run the sync script and refresh cached data."""
-    script = Path(__file__).resolve().parents[2] / "scripts" / "sync.py"
-    cmd = [sys.executable, str(script)]
-    if not full:
-        cmd.append("--no-full")
+    """Synchronize in-process and reload the UI with the new database data."""
+    from jam_mapper.core.sync import sync_challenges
 
-    with st.spinner("Sincronizando dados..."):
-        result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        with st.spinner("Sincronizando dados com a AWS Jam..."):
+            result = sync_challenges(full=full)
+    except Exception as exc:
+        st.error(f"Falha na sincronização com a AWS Jam: {exc}")
+        return
 
-    if result.returncode == 0:
-        st.success("Sincronizacao concluida")
-        st.cache_data.clear()
-    else:
-        st.error("Erro na sincronizacao")
-        st.code(result.stderr or result.stdout)
+    imported = int(result.get("imported") or 0)
+    if imported == 0:
+        st.warning("A AWS Jam respondeu, mas nenhum challenge foi importado. Verifique o token e a conta utilizada.")
+        return
+
+    st.cache_data.clear()
+    st.session_state.sync_notice = f"Sincronização concluída: {imported} challenges importados."
+    rerun = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
+    if callable(rerun):
+        rerun()
+    st.success(st.session_state.sync_notice)
 
 
 def sync_reports_from_ids(event_ids: List[str]):

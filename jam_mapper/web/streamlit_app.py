@@ -9,7 +9,7 @@ import streamlit as st
 from jam_mapper.web.components.layout import render_sidebar
 from jam_mapper.web.auth import require_authenticated_user
 from jam_mapper.core.config import get_settings
-from jam_mapper.core.token import refresh_authorization_token
+from jam_mapper.core.token import get_runtime_authorization_token
 from jam_mapper.web.context import load_challenges, load_events, merge_report_metrics
 from jam_mapper.web.theme import inject_theme
 from jam_mapper.web.views import dashboard, events, explore, notes, performance, resolution, settings, training
@@ -33,11 +33,12 @@ if not st.session_state.get("aws_session_ready"):
     if settings.token_refresh_enabled:
         try:
             with st.spinner("Conectando com segurança à AWS Jam..."):
-                refresh_authorization_token(force=True)
+                get_runtime_authorization_token(force=True)
         except Exception as exc:
             logger.exception("AWS Jam session initialization failed: %s", exc)
-            st.error("Não foi possível iniciar a sessão AWS Jam. Contate o administrador.")
-            st.stop()
+            st.warning("Não foi possível atualizar a sessão da AWS Jam automaticamente; usando o token configurado.")
+    else:
+        get_runtime_authorization_token(force=True)
     st.session_state.aws_session_ready = True
 
 if "page" not in st.session_state:
@@ -72,6 +73,10 @@ def render_page(df: pd.DataFrame):
 
 
 def main():
+    sync_notice = st.session_state.pop("sync_notice", None)
+    if sync_notice:
+        st.success(sync_notice)
+
     loader = st.empty()
     loader.markdown(
         """
@@ -92,7 +97,14 @@ def main():
     render_sidebar(events_list, user=user)
 
     if df.empty:
-        st.warning("Nenhum desafio encontrado. Execute a sincronizacao.")
+        st.warning(
+            "O banco desta instância está vazio. No Streamlit Cloud isso é esperado "
+            "na primeira execução ou após a aplicação reiniciar."
+        )
+        if st.button("Sincronizar dados agora", type="primary"):
+            from jam_mapper.web.context import run_sync
+
+            run_sync(full=False)
         return
 
     render_page(df)
