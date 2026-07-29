@@ -50,6 +50,35 @@ SQLITE_PATH=./jam_mapper.db
 EXPORT_PATH=./exports
 ```
 
+## Controle de acesso
+
+O painel inicia fechado por padrao. Somente enderecos em
+`APP_ALLOWED_EMAILS` passam pela autenticacao, e nao existe cadastro publico.
+
+Para um deploy pequeno, use o modo local:
+
+```powershell
+python scripts/configure_local_auth.py
+```
+
+Esse comando pede e-mail e senha no terminal e cria
+`.streamlit/secrets.toml`. A senha nao e salva: somente o hash e gravado. Para
+adicionar outras pessoas depois, gere hashes adicionais com
+`python scripts/hash_password.py` e edite o arquivo usando como base
+`.streamlit/secrets.toml.example`:
+
+```toml
+APP_AUTH_MODE = "local"
+APP_ALLOWED_EMAILS = "voce@exemplo.com,professora@exemplo.com"
+APP_USERS_JSON = '''{"professora@exemplo.com":{"name":"Professora","password_hash":"HASH_GERADO"}}'''
+```
+
+Para producao, o modo recomendado e OIDC (`APP_AUTH_MODE = "oidc"`) com Google
+ou outro provedor OpenID Connect. Nesse modo, o provedor valida a identidade e a
+aplicacao apenas confere se o e-mail retornado esta na lista autorizada. Configure
+a secao `[auth]` mostrada no arquivo de exemplo e cadastre a URL de callback
+`https://SEU-APP.streamlit.app/oauth2callback` no provedor.
+
 O valor de `JAM_API_JWT` deve ser o conteudo usado no header `authorization`.
 
 ### Refresh de token
@@ -64,6 +93,7 @@ preencha essas variaveis somente depois de confirmar o formato do request:
 ```env
 JAM_TOKEN_REFRESH_ENABLED=true
 JAM_TOKEN_REFRESH_URL=https://vs.aws.amazon.com/token
+JAM_TOKEN_REFRESH_METHOD=POST
 JAM_TOKEN_REFRESH_MIN_INTERVAL_SECONDS=900
 JAM_TOKEN_REFRESH_COOKIE=cole_o_cookie_do_request_aqui
 JAM_TOKEN_REFRESH_HEADERS_JSON={"content-type":"application/json"}
@@ -73,6 +103,16 @@ JAM_TOKEN_REFRESH_BODY_JSON={}
 O token renovado fica em cache no SQLite e nao e escrito no `.env`.
 Nao compartilhe esse cookie em chats, prints ou commits: ele funciona como
 credencial temporaria da sua sessao.
+
+Depois do login autorizado, o backend renova o token uma vez por sessao do
+Streamlit. O navegador da professora nunca recebe cookie, token ou credenciais
+AWS; todas as chamadas passam pelo `JamClient` no servidor. Uma resposta `401`
+tambem dispara nova tentativa de renovacao respeitando o intervalo configurado.
+
+Importante: isso renova uma sessao AWS Jam existente. Nao e correto armazenar
+usuario, senha ou MFA da conta AWS para automatizar o login do Console. Se o
+cookie/refresh token de origem expirar, o administrador deve gerar um novo secret,
+a menos que a AWS Jam disponibilize um fluxo OAuth oficial para essa integracao.
 
 ## Sincronizacao completa
 
@@ -145,7 +185,14 @@ jam_mapper/web/streamlit_app.py
 
 ```toml
 JAM_API_BASE = "https://core.proxy.prod.us-west-2.prod.jam.training.aws.dev"
-JAM_API_JWT = "seu_authorization_token"
+APP_AUTH_MODE = "oidc"
+APP_ALLOWED_EMAILS = "voce@exemplo.com,professora@exemplo.com"
+JAM_TOKEN_REFRESH_ENABLED = true
+JAM_TOKEN_REFRESH_URL = "https://vs.aws.amazon.com/token"
+JAM_TOKEN_REFRESH_METHOD = "POST"
+JAM_TOKEN_REFRESH_COOKIE = "cookie_da_sessao"
+JAM_TOKEN_REFRESH_HEADERS_JSON = '''{"content-type":"application/json"}'''
+JAM_TOKEN_REFRESH_BODY_JSON = '''{}'''
 SQLITE_PATH = "./jam_mapper.db"
 EXPORT_PATH = "./exports"
 
@@ -153,6 +200,13 @@ GITHUB_TOKEN = "github_pat_..."
 GITHUB_REPO = "usuario/repositorio"
 GITHUB_BRANCH = "main"
 GITHUB_SOLUTIONS_DIR = "solutions"
+
+[auth]
+redirect_uri = "https://SEU-APP.streamlit.app/oauth2callback"
+cookie_secret = "SEGREDO_ALEATORIO_FORTE"
+client_id = "CLIENT_ID"
+client_secret = "CLIENT_SECRET"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
 ```
 
 7. Publique o app.

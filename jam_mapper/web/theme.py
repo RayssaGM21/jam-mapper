@@ -572,11 +572,16 @@ def render_challenge_card(
     status: str = "not_started",
     personal_difficulty: int = 0,
     time_spent: int = 0,
+    has_solution_resolution: bool = False,
+    solution_storage_label: str = "",
 ) -> str:
     services = services or []
     tags_html = "".join(f"<span class='chip'>{escape(str(t))}</span>" for t in tags[:5])
     services_html = "".join(f"<span class='chip'>{escape(str(s))}</span>" for s in services[:4])
     status_html = render_status_badge(status)
+    solution_label = solution_storage_label or ("GitHub" if has_solution_resolution else "Sem resolucao")
+    solution_class = "success" if has_solution_resolution else "warning"
+    solution_html = f"<span class='badge {solution_class}'>{escape(solution_label)}</span>"
     subtitle = f"Nivel AWS {difficulty or 0} | Medio global {avg_time or 0}s"
     if personal_difficulty or time_spent:
         subtitle += f" | Seu nivel {personal_difficulty or 0} | {time_spent or 0}min"
@@ -589,7 +594,7 @@ def render_challenge_card(
                 <div class='muted' style='font-size:12px'>{escape(subtitle)}</div>
                 <div>{tags_html}{services_html}</div>
             </div>
-            <div>{status_html}</div>
+            <div style='display:flex;flex-direction:column;gap:6px;align-items:flex-end'>{status_html}{solution_html}</div>
         </div>
     </div>
     """

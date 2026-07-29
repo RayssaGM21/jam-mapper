@@ -16,6 +16,8 @@ def render_challenge_card(
     status: str = "not_started",
     personal_difficulty: int = 0,
     time_spent: int = 0,
+    has_solution_resolution: bool = False,
+    solution_storage_label: str = "",
 ) -> str:
     return theme.render_challenge_card(
         title,
@@ -26,4 +28,6 @@ def render_challenge_card(
         status,
         personal_difficulty,
         time_spent,
+        has_solution_resolution,
+        solution_storage_label,
     )

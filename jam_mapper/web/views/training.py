@@ -7,6 +7,28 @@ from jam_mapper.web.components.layout import render_header
 from jam_mapper.web.context import recommend_challenges
 
 
+def filter_training_candidates(df: pd.DataFrame, category: list[str] | None, status_filter: str | None, status_col: str) -> pd.DataFrame:
+    """Filter training candidates by category and a simple status bucket."""
+    filtered = df.copy()
+
+    if category:
+        selected_categories = [value for value in category if value]
+        if selected_categories:
+            filtered = filtered[filtered["category"].fillna("").astype(str).isin(selected_categories)]
+
+    if status_filter and status_filter != "Todos":
+        if status_filter == "Concluidos":
+            filtered = filtered[filtered[status_col].eq("done")]
+        elif status_filter == "Revisao":
+            filtered = filtered[filtered[status_col].eq("review")]
+        elif status_filter == "Nao iniciados":
+            filtered = filtered[filtered[status_col].eq("not_started")]
+        elif status_filter == "Em andamento":
+            filtered = filtered[filtered[status_col].isin(["in_progress", "done", "review"])]
+
+    return filtered
+
+
 def render(df: pd.DataFrame):
     render_header("Treino", "Monte blocos de estudo objetivos para a semana")
 
@@ -15,16 +37,26 @@ def render(df: pd.DataFrame):
         return
 
     st.markdown("<div class='card'><h2 class='section-title'>Plano de treino</h2>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     hours = c1.number_input("Horas disponiveis na semana", min_value=1, max_value=80, value=10)
     target_count = c2.number_input("Quantidade de jams", min_value=1, max_value=100, value=8)
     mode = c3.selectbox(
         "Estrategia",
-        ["Prioridade", "Revisao", "Nao iniciados", "Mais dificeis", "Com input", "Lambda", "IA"],
+        ["Prioridade", "Revisao", "Nao iniciados", "Mais dificeis", "Com input", "Lambda", "IA", "Com resolucao", "Sem resolucao"],
     )
+    category_options = sorted({str(value).strip() for value in df["category"].dropna().astype(str).tolist() if str(value).strip()})
+    selected_categories = c4.multiselect("Categoria", category_options, default=[])
+    status_filter = c5.selectbox("Status", ["Todos", "Concluidos", "Revisao", "Nao iniciados", "Em andamento"])
+    resolution_filter = c6.selectbox("Resolucao", ["Todos", "Com resolucao", "Sem resolucao"])
 
     plan = df.copy()
     status_col = "effectiveStatus" if "effectiveStatus" in plan.columns else "status"
+    plan = filter_training_candidates(plan, selected_categories or None, status_filter, status_col)
+    has_solution = plan.get("hasSolutionResolution", pd.Series(False, index=plan.index)).fillna(False).astype(bool)
+    if "hasSolutionResolution" in plan.columns and resolution_filter != "Todos":
+        has_resolution = resolution_filter == "Com resolucao"
+        plan = plan[has_solution.eq(has_resolution)]
+        has_solution = plan.get("hasSolutionResolution", pd.Series(False, index=plan.index)).fillna(False).astype(bool)
     if mode == "Prioridade":
         plan = recommend_challenges(plan, int(target_count))
     elif mode == "Revisao":
@@ -38,8 +70,12 @@ def render(df: pd.DataFrame):
             plan = plan[plan["hasInputAnswer"] | (plan["numInputTasks"] > 0)].sort_values(["difficulty", "avgSolveSeconds"], ascending=False).head(int(target_count))
         elif mode == "Lambda":
             plan = plan[plan["hasLambdaValidation"] | (plan["numLambdaTasks"] > 0)].sort_values(["difficulty", "avgSolveSeconds"], ascending=False).head(int(target_count))
-        else:
+        elif mode == "IA":
             plan = plan[plan["hasAiValidation"] | (plan["numAiTasks"] > 0)].sort_values(["difficulty", "avgSolveSeconds"], ascending=False).head(int(target_count))
+        elif mode == "Com resolucao":
+            plan = plan[has_solution].sort_values(["difficulty", "avgSolveSeconds"], ascending=False).head(int(target_count))
+        else:
+            plan = plan[~has_solution].sort_values(["difficulty", "avgSolveSeconds"], ascending=False).head(int(target_count))
 
     available_minutes = int(hours * 60)
     estimated_minutes = int(plan["avgSolveSeconds"].fillna(0).sum() / 60)
@@ -62,6 +98,8 @@ def render(df: pd.DataFrame):
                 "personalDifficulty",
                 "timeSpentMinutes",
                 "attempts",
+                "solutionStatusLabel",
+                "solutionReference",
                 "numInputTasks",
                 "numLambdaTasks",
                 "numAiTasks",
@@ -76,6 +114,8 @@ def render(df: pd.DataFrame):
                 "personalDifficulty": "Dificuldade pessoal",
                 "timeSpentMinutes": "Minutos ja gastos",
                 "attempts": "Tentativas",
+                "solutionStatusLabel": "Resolucao",
+                "solutionReference": "Referencia",
                 "numInputTasks": "Inputs",
                 "numLambdaTasks": "Lambda",
                 "numAiTasks": "IA",

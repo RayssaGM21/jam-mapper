@@ -37,13 +37,19 @@ def render(df: pd.DataFrame):
     input_count = int((df["hasInputAnswer"] | (df["numInputTasks"].fillna(0) > 0)).sum())
     lambda_count = int((df["hasLambdaValidation"] | (df["numLambdaTasks"].fillna(0) > 0)).sum())
     ai_count = int((df["hasAiValidation"] | (df["numAiTasks"].fillna(0) > 0)).sum())
+    has_solution = df.get("hasSolutionResolution", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    github_solution = has_solution & df.get("solutionStorageLabel", pd.Series("", index=df.index)).fillna("").eq("GitHub")
+    mapped_count = int(has_solution.sum())
+    github_count = int(github_solution.sum())
+    github_pct = round((github_count / total) * 100, 1) if total else 0
 
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
     k1.markdown(render_kpi_card(total, "Jams catalogados"), unsafe_allow_html=True)
     k2.markdown(render_kpi_card(f"{completion}%", "Progresso concluido", "success", f"{done} concluidos"), unsafe_allow_html=True)
     k3.markdown(render_kpi_card(remaining, "Ainda faltam", "warning"), unsafe_allow_html=True)
     k4.markdown(render_kpi_card(format_duration(total_minutes), "Tempo treinado", "accent"), unsafe_allow_html=True)
     k5.markdown(render_kpi_card(review + in_progress, "Em foco", "danger", f"{review} revisar, {in_progress} em andamento"), unsafe_allow_html=True)
+    k6.markdown(render_kpi_card(github_count, "Resolucao no Git", "success", f"{github_pct}% mapeados"), unsafe_allow_html=True)
 
     st.progress(done / total if total else 0, text=f"{done} de {total} desafios concluidos")
     st.caption(
@@ -92,7 +98,7 @@ def render(df: pd.DataFrame):
                 <div style='padding:10px 0;border-bottom:1px solid var(--border)'>
                     <div style='font-size:13px;font-weight:700'>{row.get('title') or 'Sem titulo'}</div>
                     <div class='muted' style='font-size:12px;margin-top:3px'>
-                        {row.get('statusLabel')} | dificuldade {int(row.get('personalDifficulty') or 0)}
+                        {row.get('statusLabel')} | {row.get('solutionStatusLabel', 'Sem resolucao')} | dificuldade {int(row.get('personalDifficulty') or 0)}
                     </div>
                 </div>
                 """,
@@ -114,6 +120,25 @@ def render(df: pd.DataFrame):
         st.markdown("</div>", unsafe_allow_html=True)
 
     with c2:
+        st.markdown("<div class='card'><h2 class='section-title'>Jams com resolucao mapeada</h2>", unsafe_allow_html=True)
+        mapped = df[github_solution] if "hasSolutionResolution" in df.columns else pd.DataFrame()
+        if mapped.empty:
+            st.info("Nenhuma resolucao mapeada no Git ainda.")
+        else:
+            render_rank_list(
+                {
+                    "title": row.get("title") or row.get("challengeId"),
+                    "meta": f"{row.get('solutionStatusLabel')} | {row.get('solutionReference')}",
+                    "value": row.get("solutionStorageLabel") or "Git",
+                }
+                for _, row in mapped.sort_values(["solutionStorageLabel", "title"], ascending=[True, True]).head(6).iterrows()
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+
+    c3, c4 = st.columns(2)
+    with c3:
         st.markdown("<div class='card'><h2 class='section-title'>Ultimos registros</h2>", unsafe_allow_html=True)
         recent = df[df["updatedAt"].notna()] if "updatedAt" in df.columns else pd.DataFrame()
         if recent.empty:
@@ -124,11 +149,25 @@ def render(df: pd.DataFrame):
             render_rank_list(
                 {
                     "title": row.get("title") or row.get("challengeId"),
-                    "meta": f"{row.get(label_col)} | {int(row.get(time_col) or 0)} min | {int(row.get('attempts') or 0)} tentativas",
+                    "meta": f"{row.get(label_col)} | {row.get('solutionStatusLabel', 'Sem resolucao')} | {int(row.get(time_col) or 0)} min | {int(row.get('attempts') or 0)} tentativas",
                     "value": f"D{int(row.get('personalDifficulty') or 0)}",
                 }
                 for _, row in recent.sort_values("updatedAt", ascending=False).head(6).iterrows()
             )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with c4:
+        st.markdown("<div class='card'><h2 class='section-title'>Cobertura de resolucao</h2>", unsafe_allow_html=True)
+        missing_count = max(0, total - mapped_count)
+        missing_github_count = max(0, total - github_count)
+        render_summary_grid(
+            [
+                {"label": "Com resolucao no Git", "value": github_count},
+                {"label": "Com resolucao local", "value": max(0, mapped_count - github_count)},
+                {"label": "Sem resolucao no Git", "value": missing_github_count},
+                {"label": "Cobertura Git", "value": f"{github_pct}%"},
+            ]
+        )
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)

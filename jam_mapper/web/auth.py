@@ -136,7 +136,10 @@ def _require_local() -> AuthenticatedUser:
             st.session_state.login_attempts = 0
             _rerun()
         st.session_state.login_attempts = int(st.session_state.get("login_attempts", 0)) + 1
-        st.error("E-mail ou senha inválidos.")
+        if normalized not in allowed:
+            st.error("Este e-mail não está autorizado para acessar o app local.")
+        else:
+            st.error("E-mail ou senha inválidos. Verifique a senha cadastrada para este usuário.")
     st.stop()
 
 

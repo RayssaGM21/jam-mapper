@@ -8,6 +8,8 @@ import streamlit as st
 
 from jam_mapper.core.client import JamClient
 from jam_mapper.core.db import Database
+from jam_mapper.core.github_storage import GitHubSolutionStorage
+from jam_mapper.core.solutions import solution_path
 
 
 STATUS_LABELS = {
@@ -97,8 +99,57 @@ def load_challenges() -> pd.DataFrame:
     df["is_done"] = df["status"].eq("done")
     df["needs_review"] = df["status"].eq("review")
     df["is_started"] = df["status"].isin(["in_progress", "done", "review"])
+    df = add_solution_resolution_status(df)
 
     return df.reset_index(drop=True)
+
+
+def add_solution_resolution_status(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark challenges that already have a solution document locally or in GitHub."""
+    if df.empty:
+        return df
+
+    out = df.copy()
+    if "solutionMarkdownPath" not in out.columns:
+        out["solutionMarkdownPath"] = ""
+    out["solutionMarkdownPath"] = out["solutionMarkdownPath"].fillna("")
+
+    github_storage = GitHubSolutionStorage()
+    github_paths: set[str] = set()
+    if github_storage.enabled:
+        try:
+            github_paths = github_storage.list_solution_paths()
+        except Exception:
+            github_paths = set()
+
+    def solution_state(row):
+        challenge_id = row.get("challengeId")
+        stored_path = str(row.get("solutionMarkdownPath") or "")
+        expected_github_path = github_storage.solution_path(challenge_id) if challenge_id and github_storage.enabled else ""
+        if expected_github_path and expected_github_path in github_paths:
+            return True, "GitHub", expected_github_path
+        if stored_path.startswith("github:"):
+            return True, "GitHub", stored_path.removeprefix("github:")
+        if stored_path and not stored_path.startswith("github:"):
+            from pathlib import Path
+
+            if Path(stored_path).exists():
+                return True, "Local", stored_path
+        if challenge_id:
+            local_path = solution_path(str(challenge_id))
+            if local_path.exists():
+                return True, "Local", str(local_path)
+        return False, "Sem resolucao", ""
+
+    states = out.apply(solution_state, axis=1)
+    out["hasSolutionResolution"] = states.apply(lambda value: value[0]).astype(bool)
+    out["solutionStorageLabel"] = states.apply(lambda value: value[1])
+    out["solutionReference"] = states.apply(lambda value: value[2])
+    out["solutionStatusLabel"] = out["hasSolutionResolution"].map(
+        {True: "Resolucao no Git", False: "Sem resolucao"}
+    )
+    out.loc[out["hasSolutionResolution"] & out["solutionStorageLabel"].eq("Local"), "solutionStatusLabel"] = "Resolucao local"
+    return out
 
 
 @st.cache_data(ttl=120)

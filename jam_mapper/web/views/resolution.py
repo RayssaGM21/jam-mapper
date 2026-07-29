@@ -62,7 +62,7 @@ def render(df: pd.DataFrame):
         q = q.sort_values([status_col, "difficulty", "title"], ascending=[True, False, True])
         options = q["challengeId"].head(500).tolist()
         labels = {
-            row["challengeId"]: f"{row.get('title') or row['challengeId']} | {row.get(label_col)} | input {int(row.get('numInputTasks') or 0)}"
+            row["challengeId"]: f"{row.get('title') or row['challengeId']} | {row.get(label_col)} | {row.get('solutionStatusLabel', 'Sem resolucao')} | input {int(row.get('numInputTasks') or 0)}"
             for _, row in q.head(500).iterrows()
         }
         selected_id = st.selectbox("Challenge", options, format_func=lambda value: labels.get(value, value)) if options else None
@@ -81,6 +81,7 @@ def render(df: pd.DataFrame):
                         st.session_state.solution_remote_url = html_url
                         st.session_state.solution_storage_path = path
                         st.session_state.solution_challenge_id = selected_id
+                        db.upsert_progress(selected_id, {"solutionMarkdownPath": f"github:{path}"})
                         st.success(f"Markdown pronto no GitHub: {path}")
                     except Exception as exc:
                         st.error(f"Falha ao abrir/salvar no GitHub: {exc}")
@@ -128,6 +129,8 @@ def render(df: pd.DataFrame):
                         st.session_state.solution_sha = saved.sha
                         st.session_state.solution_remote_url = saved.html_url
                         st.session_state.solution_storage_path = saved.path
+                        db.upsert_progress(active_id, {"solutionMarkdownPath": f"github:{saved.path}"})
+                        st.cache_data.clear()
                         st.success("Resolucao salva no GitHub.")
                     except Exception as exc:
                         st.error(f"Falha ao salvar no GitHub: {exc}")

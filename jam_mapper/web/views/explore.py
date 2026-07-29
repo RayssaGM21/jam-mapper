@@ -24,7 +24,7 @@ def _filter_df(df: pd.DataFrame) -> pd.DataFrame:
     difficulty = col3.selectbox("Nivel AWS", ["Todos"] + difficulties)
     focus = col4.selectbox(
         "Foco",
-        ["Todos", "Com input", "Lambda", "IA", "Revisao", "Sem iniciar", "Ja visto em evento"],
+        ["Todos", "Com input", "Lambda", "IA", "Revisao", "Sem iniciar", "Com resolucao", "Sem resolucao", "Ja visto em evento"],
     )
 
     tag_list = sorted(set(sum(df["tags_list"].tolist(), [])))
@@ -61,6 +61,10 @@ def _filter_df(df: pd.DataFrame) -> pd.DataFrame:
         q = q[q[status_col].eq("review")]
     elif focus == "Sem iniciar":
         q = q[q[status_col].eq("not_started")]
+    elif focus == "Com resolucao" and "hasSolutionResolution" in q.columns:
+        q = q[q["hasSolutionResolution"].fillna(False)]
+    elif focus == "Sem resolucao" and "hasSolutionResolution" in q.columns:
+        q = q[~q["hasSolutionResolution"].fillna(False)]
     elif focus == "Ja visto em evento" and "eventsStarted" in q.columns:
         q = q[q["eventsStarted"].fillna(0) > 0]
 
@@ -132,7 +136,7 @@ def render(df: pd.DataFrame):
         st.markdown("<div class='card'><h2 class='section-title'>Resultados</h2>", unsafe_allow_html=True)
         options = q["challengeId"].head(250).tolist()
         label_map = {
-            row["challengeId"]: f"{row.get('title') or 'Sem titulo'} | {row.get('effectiveStatusLabel') or row.get('statusLabel')}"
+            row["challengeId"]: f"{row.get('title') or 'Sem titulo'} | {row.get('effectiveStatusLabel') or row.get('statusLabel')} | {row.get('solutionStatusLabel', 'Sem resolucao')}"
             for _, row in q.head(250).iterrows()
         }
         selected_id = st.selectbox(
@@ -152,6 +156,8 @@ def render(df: pd.DataFrame):
                     row.get("effectiveStatus") or row.get("status"),
                     int(row.get("personalDifficulty") or 0),
                     int(row.get("timeSpentMinutes") or 0),
+                    bool(row.get("hasSolutionResolution") or False),
+                    row.get("solutionStorageLabel") or "",
                 ),
                 unsafe_allow_html=True,
             )
@@ -161,6 +167,10 @@ def render(df: pd.DataFrame):
         if selected_id:
             row = df[df["challengeId"].eq(selected_id)].iloc[0]
             _progress_form(row)
+            if row.get("hasSolutionResolution"):
+                st.success(f"{row.get('solutionStatusLabel')}: {row.get('solutionReference')}")
+            else:
+                st.warning("Este jam ainda nao tem resolucao mapeada no Git.")
             st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
             st.markdown("<div class='card'><h2 class='section-title'>Tasks e correcao</h2>", unsafe_allow_html=True)
             tasks = row.get("tasks") or []

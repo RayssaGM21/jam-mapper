@@ -36,6 +36,26 @@ class GitHubSolutionStorage:
     def solution_path(self, challenge_id: str) -> str:
         return f"{self.directory}/{slugify(challenge_id)}.md"
 
+    def list_solution_paths(self) -> set[str]:
+        """Return Markdown solution paths currently stored in the configured GitHub directory."""
+        if not self.enabled:
+            return set()
+
+        url = f"{self.base_url}/repos/{self.repo}/contents/{self.directory}"
+        with httpx.Client(timeout=20.0) as client:
+            response = client.get(url, headers=self._headers(), params={"ref": self.branch})
+        if response.status_code == 404:
+            return set()
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            return set()
+        return {
+            str(item.get("path"))
+            for item in payload
+            if item.get("type") == "file" and str(item.get("name") or "").lower().endswith(".md")
+        }
+
     def _headers(self) -> dict[str, str]:
         return {
             "Accept": "application/vnd.github+json",

@@ -1,4 +1,8 @@
 import unittest
+import sys
+import types
+
+sys.modules.setdefault("streamlit", types.SimpleNamespace())
 
 from jam_mapper.web.auth import hash_password, verify_password
 
