@@ -1,14 +1,22 @@
 """Markdown solution documentation page."""
 
 from pathlib import Path
+import time
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from jam_mapper.core.db import Database
 from jam_mapper.core.github_storage import GitHubSolutionStorage
 from jam_mapper.core.solutions import build_solution_template, ensure_solution_file
 from jam_mapper.web.components.layout import render_header
+
+
+_live_markdown_editor = components.declare_component(
+    "live_markdown_editor",
+    path=str(Path(__file__).resolve().parents[1] / "components" / "markdown_live_editor"),
+)
 
 
 def _selected_row(df: pd.DataFrame, challenge_id: str):
@@ -20,15 +28,116 @@ def _load_github_solution(challenge_id: str, challenge: dict):
     storage = GitHubSolutionStorage()
     remote = storage.read(challenge_id)
     if remote:
-        return remote.content, remote.sha, remote.html_url, remote.path
+        return remote.content, remote.sha, remote.html_url, remote.path, True
 
     content = build_solution_template(challenge)
-    created = storage.write(
-        challenge_id,
-        content,
-        message=f"docs: create solution for {challenge_id}",
+    return content, None, None, storage.solution_path(challenge_id), False
+
+
+def _editor_key(active_id: str, storage_mode: str) -> str:
+    return f"solution_editor_{storage_mode.lower()}_{active_id}"
+
+
+def _saved_key(active_id: str, storage_mode: str) -> str:
+    return f"solution_saved_{storage_mode.lower()}_{active_id}"
+
+
+def _textarea_key(editor_key: str) -> str:
+    return f"{editor_key}_textarea"
+
+
+def _hydrate_editor(active_id: str, storage_mode: str, content: str):
+    key = _editor_key(active_id, storage_mode)
+    saved = _saved_key(active_id, storage_mode)
+    if key not in st.session_state:
+        st.session_state[key] = content
+    if saved not in st.session_state:
+        st.session_state[saved] = content
+    return key, saved
+
+
+def _sync_textarea_from_editor(editor_key: str):
+    textarea_key = _textarea_key(editor_key)
+    current = st.session_state.get(editor_key, "")
+    if st.session_state.get(textarea_key) != current:
+        st.session_state[textarea_key] = current
+    return textarea_key
+
+
+def _render_markdown_preview(content: str, height: int = 520):
+    with st.container(height=height, border=True):
+        if not content.strip():
+            st.info("Preview vazio.")
+            return
+        st.markdown(content)
+
+
+def _autosave_local(path: Path, edited: str, saved_key: str):
+    if edited == st.session_state.get(saved_key):
+        return
+    path.write_text(edited, encoding="utf-8")
+    st.session_state[saved_key] = edited
+    st.session_state.solution_autosave_notice = f"Salvo automaticamente as {time.strftime('%H:%M:%S')}."
+
+
+def _autosave_github(github_storage: GitHubSolutionStorage, db: Database, active_id: str, edited: str, saved_key: str):
+    if edited == st.session_state.get(saved_key):
+        return
+    saved = github_storage.write(
+        active_id,
+        edited,
+        message=f"docs: autosave solution for {active_id}",
+        sha=st.session_state.get("solution_sha"),
     )
-    return created.content, created.sha, created.html_url, created.path
+    st.session_state.solution_content = edited
+    st.session_state.solution_sha = saved.sha
+    st.session_state.solution_remote_url = saved.html_url
+    st.session_state.solution_storage_path = saved.path
+    st.session_state[saved_key] = edited
+    st.session_state.solution_autosave_notice = f"Salvo automaticamente no GitHub as {time.strftime('%H:%M:%S')}."
+    db.upsert_progress(active_id, {"solutionMarkdownPath": f"github:{saved.path}"})
+    st.cache_data.clear()
+
+
+def _component_content(value):
+    if isinstance(value, dict):
+        return str(value.get("content") or ""), bool(value.get("shouldSave"))
+    if isinstance(value, str):
+        return value, True
+    return None, False
+
+
+@st.dialog("Editor expandido", width="large")
+def _expanded_markdown_editor(editor_key: str, saved_key: str, storage_mode: str, active_id: str, selected_path: str = ""):
+    db = Database()
+    expanded_key = f"{editor_key}_expanded"
+    if expanded_key not in st.session_state:
+        st.session_state[expanded_key] = st.session_state.get(editor_key, "")
+
+    component_value = _live_markdown_editor(
+        value=st.session_state.get(expanded_key, ""),
+        key=f"{expanded_key}_component",
+        default=st.session_state.get(expanded_key, ""),
+    )
+    edited, should_save = _component_content(component_value)
+    if edited is not None:
+        st.session_state[expanded_key] = edited
+        st.session_state[editor_key] = edited
+        if not should_save:
+            return
+        if storage_mode == "github":
+            github_storage = GitHubSolutionStorage()
+            try:
+                _autosave_github(github_storage, db, active_id, edited, saved_key)
+            except Exception as exc:
+                st.error(f"Falha no salvamento automatico no GitHub: {exc}")
+        else:
+            try:
+                _autosave_local(Path(selected_path), edited, saved_key)
+            except Exception as exc:
+                st.error(f"Falha no salvamento automatico local: {exc}")
+        if st.session_state.get("solution_autosave_notice"):
+            st.caption(st.session_state.solution_autosave_notice)
 
 
 def render(df: pd.DataFrame):
@@ -75,20 +184,32 @@ def render(df: pd.DataFrame):
                 challenge = db.get_challenge(selected_id) or row.to_dict()
                 if github_storage.enabled:
                     try:
-                        content, sha, html_url, path = _load_github_solution(selected_id, challenge)
+                        content, sha, html_url, path, exists_remote = _load_github_solution(selected_id, challenge)
                         st.session_state.solution_content = content
                         st.session_state.solution_sha = sha
                         st.session_state.solution_remote_url = html_url
                         st.session_state.solution_storage_path = path
                         st.session_state.solution_challenge_id = selected_id
-                        db.upsert_progress(selected_id, {"solutionMarkdownPath": f"github:{path}"})
-                        st.success(f"Markdown pronto no GitHub: {path}")
+                        editor_key = _editor_key(selected_id, "github")
+                        saved_key = _saved_key(selected_id, "github")
+                        st.session_state[editor_key] = content
+                        st.session_state[saved_key] = content
+                        if exists_remote:
+                            db.upsert_progress(selected_id, {"solutionMarkdownPath": f"github:{path}"})
+                            st.success(f"Markdown pronto no GitHub: {path}")
+                        else:
+                            st.info("Template carregado. O arquivo so sera criado no GitHub quando voce alterar o texto.")
                     except Exception as exc:
                         st.error(f"Falha ao abrir/salvar no GitHub: {exc}")
                 else:
                     path = ensure_solution_file(selected_id)
                     st.session_state.solution_path = str(path)
                     st.session_state.solution_challenge_id = selected_id
+                    content = path.read_text(encoding="utf-8")
+                    editor_key = _editor_key(selected_id, "local")
+                    saved_key = _saved_key(selected_id, "local")
+                    st.session_state[editor_key] = content
+                    st.session_state[saved_key] = content
                     st.success(f"Arquivo pronto: {path}")
                 st.cache_data.clear()
         st.markdown("</div>", unsafe_allow_html=True)
@@ -115,29 +236,50 @@ def render(df: pd.DataFrame):
         if github_storage.enabled:
             content = st.session_state.get("solution_content")
             if active_id and content is not None:
-                edited = st.text_area("Conteudo", value=content, height=520)
+                editor_key, saved_key = _hydrate_editor(active_id, "github", content)
+                if st.button("Expandir editor", use_container_width=True):
+                    st.session_state[f"{editor_key}_expanded"] = st.session_state.get(editor_key, "")
+                    _expanded_markdown_editor(editor_key, saved_key, "github", active_id)
+                tabs = st.tabs(["Editor", "Preview"])
+                with tabs[0]:
+                    textarea_key = _sync_textarea_from_editor(editor_key)
+                    edited = st.text_area("Conteudo", key=textarea_key, height=520)
+                    st.session_state[editor_key] = edited
+                    try:
+                        _autosave_github(github_storage, db, active_id, edited, saved_key)
+                    except Exception as exc:
+                        st.error(f"Falha no salvamento automatico no GitHub: {exc}")
+                    if st.session_state.get("solution_autosave_notice"):
+                        st.caption(st.session_state.solution_autosave_notice)
+                with tabs[1]:
+                    _render_markdown_preview(st.session_state.get(editor_key, ""))
                 c1, c2 = st.columns(2)
                 if c1.button("Salvar no GitHub", use_container_width=True):
                     try:
-                        saved = github_storage.write(
-                            active_id,
-                            edited,
-                            message=f"docs: update solution for {active_id}",
-                            sha=st.session_state.get("solution_sha"),
-                        )
-                        st.session_state.solution_content = edited
-                        st.session_state.solution_sha = saved.sha
-                        st.session_state.solution_remote_url = saved.html_url
-                        st.session_state.solution_storage_path = saved.path
-                        db.upsert_progress(active_id, {"solutionMarkdownPath": f"github:{saved.path}"})
-                        st.cache_data.clear()
-                        st.success("Resolucao salva no GitHub.")
+                        edited = st.session_state.get(editor_key, "")
+                        if edited == st.session_state.get(saved_key):
+                            st.info("Nada para salvar. O arquivo nao foi criado/alterado no GitHub.")
+                        else:
+                            saved = github_storage.write(
+                                active_id,
+                                edited,
+                                message=f"docs: update solution for {active_id}",
+                                sha=st.session_state.get("solution_sha"),
+                            )
+                            st.session_state.solution_content = edited
+                            st.session_state.solution_sha = saved.sha
+                            st.session_state.solution_remote_url = saved.html_url
+                            st.session_state.solution_storage_path = saved.path
+                            db.upsert_progress(active_id, {"solutionMarkdownPath": f"github:{saved.path}"})
+                            st.session_state[saved_key] = edited
+                            st.cache_data.clear()
+                            st.success("Resolucao salva no GitHub.")
                     except Exception as exc:
                         st.error(f"Falha ao salvar no GitHub: {exc}")
                 with c2:
                     st.download_button(
                         "Baixar Markdown",
-                        edited,
+                        st.session_state.get(editor_key, ""),
                         file_name=f"{active_id}.md",
                         mime="text/markdown",
                         use_container_width=True,
@@ -156,15 +298,33 @@ def render(df: pd.DataFrame):
             if selected_path and Path(selected_path).exists():
                 path = Path(selected_path)
                 content = path.read_text(encoding="utf-8")
-                edited = st.text_area("Conteudo", value=content, height=520)
+                editor_key, saved_key = _hydrate_editor(active_id, "local", content)
+                if st.button("Expandir editor", use_container_width=True):
+                    st.session_state[f"{editor_key}_expanded"] = st.session_state.get(editor_key, "")
+                    _expanded_markdown_editor(editor_key, saved_key, "local", active_id, str(path))
+                tabs = st.tabs(["Editor", "Preview"])
+                with tabs[0]:
+                    textarea_key = _sync_textarea_from_editor(editor_key)
+                    edited = st.text_area("Conteudo", key=textarea_key, height=520)
+                    st.session_state[editor_key] = edited
+                    try:
+                        _autosave_local(path, edited, saved_key)
+                    except Exception as exc:
+                        st.error(f"Falha no salvamento automatico local: {exc}")
+                    if st.session_state.get("solution_autosave_notice"):
+                        st.caption(st.session_state.solution_autosave_notice)
+                with tabs[1]:
+                    _render_markdown_preview(st.session_state.get(editor_key, ""))
                 c1, c2 = st.columns(2)
                 if c1.button("Salvar Markdown", use_container_width=True):
+                    edited = st.session_state.get(editor_key, "")
                     path.write_text(edited, encoding="utf-8")
+                    st.session_state[saved_key] = edited
                     st.success("Resolucao salva.")
                 with c2:
                     st.download_button(
                         "Baixar Markdown",
-                        edited,
+                        st.session_state.get(editor_key, ""),
                         file_name=path.name,
                         mime="text/markdown",
                         use_container_width=True,

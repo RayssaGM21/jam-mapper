@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root {
+      color-scheme: light;
+      --text: #111827;
+      --muted: #667085;
+      --border: #d9e2ec;
+      --surface: #ffffff;
+      --soft: #f7f9fc;
+      --primary: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: transparent;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
+      gap: 20px;
+      height: 620px;
+      overflow: hidden;
+    }
+
+    .panel {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.25;
+      font-weight: 760;
+      color: var(--text);
+    }
+
+    textarea,
+    .preview {
+      height: 580px;
+      width: 100%;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+
+    textarea {
+      resize: none;
+      padding: 18px;
+      color: var(--text);
+      font: 14px/1.55 Consolas, "SFMono-Regular", Menlo, monospace;
+      outline: none;
+      caret-color: var(--primary);
+    }
+
+    textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2);
+    }
+
+    .preview {
+      padding: 22px 24px;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .preview h1,
+    .preview h2,
+    .preview h3,
+    .preview h4 {
+      margin: 0.9em 0 0.45em;
+      line-height: 1.25;
+    }
+
+    .preview h1:first-child,
+    .preview h2:first-child,
+    .preview h3:first-child {
+      margin-top: 0;
+    }
+
+    .preview h1 { font-size: 28px; }
+    .preview h2 { font-size: 23px; }
+    .preview h3 { font-size: 18px; }
+    .preview h4 { font-size: 16px; }
+
+    .preview p {
+      margin: 0.5em 0;
+    }
+
+    .preview ul,
+    .preview ol {
+      margin: 0.55em 0 0.75em;
+      padding-left: 1.35em;
+    }
+
+    .preview li {
+      margin: 0.22em 0;
+    }
+
+    .preview code {
+      background: #f2f4f7;
+      color: #175cd3;
+      border-radius: 6px;
+      padding: 2px 5px;
+      font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+      font-size: 0.92em;
+    }
+
+    .preview pre {
+      overflow: auto;
+      padding: 12px 14px;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 10px;
+      line-height: 1.45;
+    }
+
+    .preview pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+
+    .preview blockquote {
+      margin: 0.8em 0;
+      padding: 0.2em 0 0.2em 0.9em;
+      border-left: 3px solid var(--border);
+      color: var(--muted);
+    }
+
+    .preview hr {
+      border: 0;
+      border-top: 1px solid var(--border);
+      margin: 1em 0;
+    }
+
+    .empty {
+      color: var(--muted);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="workspace">
+    <section class="panel">
+      <h3 class="panel-title">Editor</h3>
+      <textarea id="editor" spellcheck="false"></textarea>
+    </section>
+    <section class="panel">
+      <h3 class="panel-title">Preview</h3>
+      <div id="preview" class="preview"></div>
+    </section>
+  </div>
+
+  <script>
+    const editor = document.getElementById("editor");
+    const preview = document.getElementById("preview");
+    let syncTimer = null;
+    let saveTimer = null;
+    let currentValue = "";
+
+    function escapeHtml(value) {
+      return value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function inlineMarkdown(value) {
+      let out = escapeHtml(value);
+      out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+      out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      out = out.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+      return out;
+    }
+
+    function renderMarkdown(markdown) {
+      if (!markdown.trim()) {
+        return "<div class='empty'>Preview vazio.</div>";
+      }
+
+      const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+      const html = [];
+      let listType = null;
+      let inCode = false;
+      let codeLines = [];
+
+      function closeList() {
+        if (listType) {
+          html.push(`</${listType}>`);
+          listType = null;
+        }
+      }
+
+      function flushCode() {
+        html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+        codeLines = [];
+      }
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith("```")) {
+          closeList();
+          if (inCode) {
+            flushCode();
+            inCode = false;
+          } else {
+            inCode = true;
+          }
+          continue;
+        }
+
+        if (inCode) {
+          codeLines.push(line);
+          continue;
+        }
+
+        if (!trimmed) {
+          closeList();
+          continue;
+        }
+
+        const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+        if (heading) {
+          closeList();
+          const level = heading[1].length;
+          html.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
+          continue;
+        }
+
+        if (trimmed === "---" || trimmed === "***") {
+          closeList();
+          html.push("<hr>");
+          continue;
+        }
+
+        if (trimmed.startsWith("> ")) {
+          closeList();
+          html.push(`<blockquote>${inlineMarkdown(trimmed.slice(2))}</blockquote>`);
+          continue;
+        }
+
+        const ordered = trimmed.match(/^\d+\.\s+(.+)$/);
+        if (ordered) {
+          if (listType !== "ol") {
+            closeList();
+            listType = "ol";
+            html.push("<ol>");
+          }
+          html.push(`<li>${inlineMarkdown(ordered[1])}</li>`);
+          continue;
+        }
+
+        const unordered = trimmed.match(/^[-*]\s+(.+)$/);
+        if (unordered) {
+          if (listType !== "ul") {
+            closeList();
+            listType = "ul";
+            html.push("<ul>");
+          }
+          html.push(`<li>${inlineMarkdown(unordered[1])}</li>`);
+          continue;
+        }
+
+        closeList();
+        html.push(`<p>${inlineMarkdown(trimmed)}</p>`);
+      }
+
+      closeList();
+      if (inCode) {
+        flushCode();
+      }
+      return html.join("");
+    }
+
+    function sendValue(value, shouldSave) {
+      window.parent.postMessage(
+        {
+          isStreamlitMessage: true,
+          type: "streamlit:setComponentValue",
+          value: {
+            content: value,
+            shouldSave,
+            sentAt: Date.now(),
+          },
+        },
+        "*"
+      );
+    }
+
+    function setFrameHeight() {
+      window.parent.postMessage(
+        {
+          isStreamlitMessage: true,
+          type: "streamlit:setFrameHeight",
+          height: 620,
+        },
+        "*"
+      );
+    }
+
+    function updatePreview(value) {
+      preview.innerHTML = renderMarkdown(value);
+    }
+
+    editor.addEventListener("input", () => {
+      currentValue = editor.value;
+      updatePreview(currentValue);
+      clearTimeout(syncTimer);
+      clearTimeout(saveTimer);
+      syncTimer = setTimeout(() => sendValue(currentValue, false), 180);
+      saveTimer = setTimeout(() => sendValue(currentValue, true), 800);
+    });
+
+    editor.addEventListener("blur", () => {
+      currentValue = editor.value;
+      clearTimeout(syncTimer);
+      clearTimeout(saveTimer);
+      sendValue(currentValue, true);
+    });
+
+    window.addEventListener("beforeunload", () => {
+      sendValue(editor.value, true);
+    });
+
+    window.addEventListener("pagehide", () => {
+      sendValue(editor.value, true);
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        sendValue(editor.value, true);
+      }
+    });
+
+    window.addEventListener("message", (event) => {
+      const data = event.data || {};
+      if (data.type !== "streamlit:render") {
+        return;
+      }
+
+      const nextValue = (data.args && data.args.value) || "";
+      if (nextValue !== currentValue && document.activeElement !== editor) {
+        currentValue = nextValue;
+        editor.value = nextValue;
+        updatePreview(nextValue);
+      }
+      setFrameHeight();
+    });
+
+    window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*");
+    setFrameHeight();
+  </script>
+</body>
+</html>
